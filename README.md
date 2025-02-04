@@ -19,7 +19,7 @@ Potential improvement: The fact that multiple address are targeted means that a 
 ## Implementation
 
 In pseudo-code, what the program will do once the parsing is done is:
-Add the root URL to a stack. 
-Find all URLs within the page and add them to the stack if they are inside the website and are not inside the stack.
-Get all images from the current page matching the file extension.
-Go to the next item in the stack.
+- Add the root URL to a stack. 
+- Find all URLs within the page and add them to the stack if they are inside the website and are not inside the stack.
+- Get all images from the current page matching the file extension.
+- Go to the next item in the stack.
