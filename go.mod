@@ -1,4 +1,4 @@
-module arachnida/Spider
+module arachnida/spider
 
 go 1.23.5
 
