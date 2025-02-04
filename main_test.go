@@ -5,6 +5,89 @@ import (
 	"testing"
 )
 
+func TestGetRecurseLevel(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantLevel int
+		wantErr   bool
+	}{
+		{
+			name:      "-l but no -l value",
+			args:      []string{"-r", "-l"},
+			wantLevel: 0,
+			wantErr:   true,
+		},
+		{
+			name:      "-l value 5",
+			args:      []string{"-r", "-l", "5"},
+			wantLevel: 5,
+			wantErr:   false,
+		},
+		{
+			name:      "-r no -l value",
+			args:      []string{"-r"},
+			wantLevel: 5,
+			wantErr:   false,
+		},
+		{
+			name:      "multiple -r ",
+			args:      []string{"-r", "-r"},
+			wantLevel: 0,
+			wantErr:   true,
+		},
+		{
+			name:      "no -r no -l",
+			args:      []string{""},
+			wantLevel: 0,
+			wantErr:   false,
+		},
+		{
+			name:      "42 inside range",
+			args:      []string{"-r", "-l", "42"},
+			wantLevel: 42,
+			wantErr:   false,
+		},
+		{
+			name:      "lower limit",
+			args:      []string{"-r", "-l", "1"},
+			wantLevel: 1,
+			wantErr:   false,
+		},
+		{
+			name:      "upper limit",
+			args:      []string{"-r", "-l", "50"},
+			wantLevel: 50,
+			wantErr:   false,
+		},
+		{
+			name:      "under by 1",
+			args:      []string{"-r", "-l", "0"},
+			wantLevel: 0,
+			wantErr:   true,
+		},
+		{
+			name:      "over by 1",
+			args:      []string{"-r", "-l", "51"},
+			wantLevel: 0,
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotLevel, err := getRecurseLevel(tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("getRecurseLevel() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if gotLevel != tt.wantLevel {
+				t.Errorf("getRecurseLevel() = %v, want %v", gotLevel, tt.wantLevel)
+			}
+		})
+	}
+}
+
 // TestGetOutputFolder tests the getOutputFolder function.
 func TestGetOutputFolder(t *testing.T) {
 	tests := []struct {
