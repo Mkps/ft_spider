@@ -5,6 +5,124 @@ import (
 	"testing"
 )
 
+func TestParser(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantOutput string
+		wantLevel  int
+		wantPath   string
+		wantErr    bool
+	}{
+		{
+			name:       "Site name",
+			args:       []string{"https://example.com"},
+			wantOutput: "https://example.com",
+			wantLevel:  0,
+			wantPath:   "./data/",
+			wantErr:    false,
+		},
+		{
+			name:       "Site name with directories",
+			args:       []string{"https://example.com/local/news/"},
+			wantOutput: "https://example.com/local/news/",
+			wantLevel:  0,
+			wantPath:   "./data/",
+			wantErr:    false,
+		},
+		{
+			name:       "Site name with flags valid",
+			args:       []string{"-r", "-l", "5", "-p", "./datatest/", "https://example.com/local/news/"},
+			wantOutput: "https://example.com/local/news/",
+			wantLevel:  5,
+			wantPath:   "./datatest/",
+			wantErr:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotOutput, gotLevel, gotPath, err := parser(tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parser() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if gotOutput != tt.wantOutput {
+				t.Errorf("parser() = %v, want %v", gotOutput, tt.wantOutput)
+			} else if gotLevel != tt.wantLevel {
+				t.Errorf("parser() = %v, want %v", gotLevel, tt.wantLevel)
+			} else if gotPath != tt.wantPath {
+				t.Errorf("parser() = %v, want %v", gotPath, tt.wantPath)
+			}
+		})
+	}
+}
+
+func TestGetURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantOutput string
+		wantErr    bool
+	}{
+		{
+			name:       "Site name",
+			args:       []string{"https://example.com"},
+			wantOutput: "https://example.com",
+			wantErr:    false,
+		},
+		{
+			name:       "Site name with directories",
+			args:       []string{"https://example.com/local/news/"},
+			wantOutput: "https://example.com/local/news/",
+			wantErr:    false,
+		},
+		{
+			name:       "Site name with flags valid",
+			args:       []string{"-r", "-l", "5", "-p", "./data/", "https://example.com/local/news/"},
+			wantOutput: "https://example.com/local/news/",
+			wantErr:    false,
+		},
+		{
+			name:       "empty URL",
+			args:       []string{""},
+			wantOutput: "",
+			wantErr:    true,
+		},
+		{
+			name:       "URL is flag",
+			args:       []string{"-r"},
+			wantOutput: "",
+			wantErr:    true,
+		},
+		{
+			name:       "URL is flag argument",
+			args:       []string{"-p", "https://example.com"},
+			wantOutput: "",
+			wantErr:    true,
+		},
+		{
+			name:       "Multiple URLs",
+			args:       []string{"https://localhost", "https://example.com"},
+			wantOutput: "",
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotOutput, err := getURL(tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("getURL() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if gotOutput != tt.wantOutput {
+				t.Errorf("getURL() = %v, want %v", gotOutput, tt.wantOutput)
+			}
+		})
+	}
+}
+
 func TestGetRecurseLevel(t *testing.T) {
 	tests := []struct {
 		name      string
