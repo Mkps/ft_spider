@@ -10,6 +10,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 
 	"golang.org/x/net/html"
 )
@@ -235,6 +236,8 @@ func crawl(startURL string, recurseLevel int, outputFolder string) {
 	}{{startURL, 0}}
 
 	startDomain, _ := url.Parse(startURL)
+	var wg sync.WaitGroup
+	mutex := &sync.Mutex{}
 
 	for len(queue) > 0 {
 		item := queue[0]
@@ -243,39 +246,50 @@ func crawl(startURL string, recurseLevel int, outputFolder string) {
 			continue
 		}
 
+		mutex.Lock()
 		if visited[item.url] {
+			mutex.Unlock()
 			continue
 		}
 		visited[item.url] = true
+		mutex.Unlock()
 
-		fmt.Println("Visiting:", item.url)
+		wg.Add(1)
+		go func(pageURL string, depth int) {
+			defer wg.Done()
+			fmt.Println("Visiting:", pageURL)
 
-		resp, err := http.Get(item.url)
-		if err != nil {
-			fmt.Println("Error fetching page:", err)
-			return
-		}
-		defer resp.Body.Close()
-
-		links := extractLinks(resp.Body, item.url)
-		fmt.Println("Downloading images for", item.url, "at a depth of", item.depth)
-		downloadImages(item.url, outputFolder)
-
-		for _, link := range links {
-			linkURL, err := url.Parse(link)
-			if err != nil || linkURL.Host != startDomain.Host {
-				continue
+			resp, err := http.Get(pageURL)
+			if err != nil {
+				fmt.Println("Error fetching page:", err)
+				return
 			}
+			defer resp.Body.Close()
 
-			if !visited[link] {
-				// fmt.Println("Found unique link", link)
-				queue = append(queue, struct {
-					url   string
-					depth int
-				}{link, item.depth + 1})
+			links := extractLinks(resp.Body, pageURL)
+			fmt.Println("Downloading images for", pageURL, "at a depth of", depth)
+			downloadImages(pageURL, outputFolder)
+
+			for _, link := range links {
+				linkURL, err := url.Parse(link)
+				if err != nil || linkURL.Host != startDomain.Host {
+					continue
+				}
+
+				mutex.Lock()
+				if !visited[link] {
+					// fmt.Println("Found unique link", link)
+					queue = append(queue, struct {
+						url   string
+						depth int
+					}{link, depth + 1})
+				}
+				mutex.Unlock()
 			}
-		}
+		}(item.url, item.depth)
+		wg.Wait()
 	}
+	wg.Wait()
 }
 
 func main() {
