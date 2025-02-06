@@ -102,7 +102,7 @@ func getOutputFolder(argList []string) (string, error) {
 }
 
 func IsFlag(arg string) bool {
-	if arg == "-l" || arg == "-r" || arg == "-p" {
+	if arg == "-l" || arg == "-r" || arg == "-p" || arg == "-v" {
 		return true
 	}
 	return false
@@ -134,20 +134,30 @@ func ErrorExit(err error) {
 	os.Exit(1)
 }
 
-func parser(argList []string) (string, int, string, error) {
+func isVerbose(argList []string) bool {
+	for i := 0; i < len(argList); i++ {
+		if argList[i] == "-v" {
+			return true
+		}
+	}
+	return false
+}
+
+func parser(argList []string) (string, int, string, bool, error) {
 	recurseLevel, err := getRecurseLevel(argList)
 	if err != nil {
-		return "", 0, "", err
+		return "", 0, "", false, err
 	}
 	url, err := getURL(argList)
 	if err != nil {
-		return "", 0, "", err
+		return "", 0, "", false, err
 	}
 	outputFolder, err := getOutputFolder(argList)
 	if err != nil {
-		return "", 0, "", err
+		return "", 0, "", false, err
 	}
-	return url, recurseLevel, outputFolder, nil
+	verbose := isVerbose(argList)
+	return url, recurseLevel, outputFolder, verbose, nil
 }
 
 func hasImageSuffix(link string) bool {
@@ -244,12 +254,12 @@ func processDownload(jobId int,
 	}
 	defer resp.Body.Close()
 	outputMutex.Lock()
-	fmt.Printf("[W%d] Downloading images from '%s'\n", jobId, activeJob.url)
+	fmt.Printf("Downloading images from '%s'\n", activeJob.url)
 	outputMutex.Unlock()
 	downloadImages(activeJob.url, outputFolder)
 }
 
-func crawl(startURL string, recurseLevel int, outputFolder string) {
+func crawl(startURL string, recurseLevel int, outputFolder string, verbose bool) {
 	visited := make(map[string]bool)
 	var wg sync.WaitGroup
 	mutex := &sync.Mutex{}
@@ -274,11 +284,8 @@ func crawl(startURL string, recurseLevel int, outputFolder string) {
 			defer wg.Done()
 			for item := range queue {
 				processURL(item.url, item.depth, recurseLevel, queue, jobs,
-					startDomain, mutex, outputMutex, visited, &activeWorkers, &activeJobs)
+					startDomain, mutex, outputMutex, visited, &activeWorkers, &activeJobs, verbose)
 			}
-			outputMutex.Lock()
-			fmt.Printf("wId [W%d] is done\n", workerId)
-			outputMutex.Unlock()
 		}(i)
 	}
 
@@ -291,9 +298,6 @@ func crawl(startURL string, recurseLevel int, outputFolder string) {
 				processDownload(jobId, item,
 					outputMutex, outputFolder, &activeJobs)
 			}
-			outputMutex.Lock()
-			fmt.Printf("jobId [J%d] is done\n", jobId)
-			outputMutex.Unlock()
 		}(i)
 	}
 	done := make(chan struct{})
@@ -307,14 +311,15 @@ func crawl(startURL string, recurseLevel int, outputFolder string) {
 		for {
 			time.Sleep(100 * time.Millisecond) // Avoid tight loop
 			if atomic.LoadInt32(&activeWorkers) == 0 && atomic.LoadInt32(&activeJobs) == 0 {
+				fmt.Println("closing q and j")
 				close(queue)
 				close(jobs)
-				close(done)
-				return
 			}
-			outputMutex.Lock()
-			fmt.Printf("stats: active link jobs %d active downloads job %d\n Channel status: link_process %d || download_process %d\n", atomic.LoadInt32(&activeWorkers), atomic.LoadInt32(&activeJobs), len(queue), len(jobs))
-			outputMutex.Unlock()
+			if verbose {
+				outputMutex.Lock()
+				fmt.Printf("stats:\n active link jobs %d || active downloads job %d\n Channel status: link_process %d || download_process %d\n", atomic.LoadInt32(&activeWorkers), atomic.LoadInt32(&activeJobs), len(queue), len(jobs))
+				outputMutex.Unlock()
+			}
 		}
 	}()
 	select {
@@ -338,11 +343,9 @@ func processURL(pageURL string, depth, recurseLevel int,
 	startDomain *url.URL, mutex *sync.Mutex,
 	outputMutex *sync.Mutex,
 	visited map[string]bool, activeWorker, activeJob *int32,
+	verbose bool,
 ) {
 	defer atomic.AddInt32(activeWorker, -1)
-	outputMutex.Lock()
-	fmt.Printf("Opening URL\n")
-	outputMutex.Unlock()
 	resp, err := http.Get(pageURL)
 	if err != nil {
 		fmt.Println("Error fetching page:", err)
@@ -350,6 +353,10 @@ func processURL(pageURL string, depth, recurseLevel int,
 	}
 	defer resp.Body.Close()
 
+	buffer := []struct {
+		url   string
+		depth int
+	}{}
 	links := extractLinks(resp.Body, pageURL)
 	for _, link := range links {
 		linkURL, err := url.Parse(link)
@@ -364,22 +371,41 @@ func processURL(pageURL string, depth, recurseLevel int,
 		visited[link] = true
 		mutex.Unlock()
 
-		queue <- struct {
+		buffer = append(buffer, struct {
 			url   string
 			depth int
-		}{link, depth + 1}
+		}{link, depth + 1})
+
 		job <- struct {
 			url   string
 			depth int
 		}{link, depth + 1}
 
-		atomic.AddInt32(activeWorker, 1)
 		atomic.AddInt32(activeJob, 1)
 
+		if verbose {
+			outputMutex.Lock()
+			fmt.Printf("New URL added link '%s'\n", link)
+			outputMutex.Unlock()
+		}
+	}
+	if verbose {
 		outputMutex.Lock()
-		fmt.Printf("New URL added link '%s'\n", link)
-		fmt.Printf("stats: active jobs %d channel length %d\n", atomic.LoadInt32(activeWorker), len(queue))
+		fmt.Printf("Size of buffer %d'\n", len(buffer))
 		outputMutex.Unlock()
+	}
+	for len(buffer) > 0 {
+		select {
+		case queue <- buffer[0]: // Add first item in buffer
+			buffer = buffer[1:] // Remove from buffer
+			atomic.AddInt32(activeWorker, 1)
+		case <-time.After(250 * time.Millisecond):
+			if verbose {
+				outputMutex.Lock()
+				fmt.Println("Queue full, retrying... Size of buffer", len(buffer))
+				outputMutex.Unlock()
+			}
+		}
 	}
 }
 
@@ -388,12 +414,12 @@ func main() {
 		fmt.Println("Usage: ./spider [-rlp] URL")
 		os.Exit(1)
 	}
-	url, recurseLevel, outputFolder, err := parser(os.Args[1:])
+	url, recurseLevel, outputFolder, verbose, err := parser(os.Args[1:])
 	if err != nil {
 		ErrorExit(err)
 	}
 	fmt.Println("Spider is starting: depth-level", recurseLevel, "url", url, "outputFolder", outputFolder)
-	crawl(url, recurseLevel, outputFolder)
+	crawl(url, recurseLevel, outputFolder, verbose)
 
 	os.Exit(0)
 }
